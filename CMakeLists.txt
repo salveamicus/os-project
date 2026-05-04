@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.22)
 
 project(schedulerSim)
 
@@ -10,6 +10,9 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+set(JSONCPP_WITH_TESTS OFF CACHE BOOL "" FORCE)         # we don't run jsoncpp's own tests
+set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF CACHE BOOL "" FORCE)
+set(BUILD_OBJECT_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/jsoncpp)
 
 add_executable(${PROJECT_NAME})

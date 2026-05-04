@@ -123,16 +123,23 @@ void policy::Policy::printTraceAnalysis()
     int maxResp = 0;        // maximum response time
     int starvation = 0;     // amount of startvation
     int contextSwitches = 0;// context switch overhead
-    float avgFairness = 0;  // fairness 
+    float avgFairness = 0;  // fairness
 
     int contextSwitchTime = 10;
     contextSwitches = this->trace.trace.size() - 1; // number of times context siwtched
-                                    
+
     int turn;
     int resp;
     int starved = 0;
     float unfairness;
-    
+
+    // extra metric accumulators added for the final paper
+    long long sumWaiting   = 0;   // turnaround minus burst, summed
+    long long sumBurst     = 0;   // total cpu work across all jobs
+    double    jainNum      = 0.0; // numerator for jain's index
+    double    jainDen      = 0.0; // denominator for jain's index
+    int       lastEnd      = 0;   // for throughput and cpu util
+
     for(Job j : this->trace.s.schedule)
     {
         resp = this->trace.getFirstOccured(j.getID()).getStart() - j.getArrival();
@@ -141,7 +148,7 @@ void policy::Policy::printTraceAnalysis()
         if (resp < 0) resp = 0;
         turn = this->trace.getLastOccured(j.getID()).getEnd() - j.getArrival(); // end - arrival, get end from trace
         unfairness = this->trace.fairnessEvent(j.getID());
-        
+
         if(maxResp < resp)
         {
             maxResp = resp;
@@ -156,13 +163,35 @@ void policy::Policy::printTraceAnalysis()
         {
             starved = 1;
         }
-        
+
         if (!policy::csvMode)
             std::cout << "Job " << j.getID() << " - Response Time: " << resp << ", Turnabout Time: " << turn << ", Unfairness: " << unfairness << ", Starved: " << starved <<std::endl;
-        
+
         avgResp += resp; //add together the response times
         avgTurn += turn; //add together all turnabouts
         avgFairness += unfairness; //add together all
+
+        // jain's fairness index uses x_i = 1/turnaround as the per-job
+        // share. when all turnarounds are equal, jain returns 1.0;
+        // skewed distributions push it toward 1/n.
+        if (turn > 0) {
+            double x = 1.0 / (double)turn;
+            jainNum += x;
+            jainDen += x * x;
+        }
+
+        // waiting time = turnaround - actual cpu work for this job
+        int burst = turn - resp; // approximation: cpu time = turnaround - waiting-before-start
+        // more accurate: sum of (event.end - event.start) where event.id matches
+        int actualBurst = 0;
+        for (policy::Event e : this->trace.trace)
+            if (e.getID() == j.getID())
+                actualBurst += e.getEnd() - e.getStart();
+        sumWaiting += turn - actualBurst;
+        sumBurst   += actualBurst;
+
+        int endT = this->trace.getLastOccured(j.getID()).getEnd();
+        if (endT > lastEnd) lastEnd = endT;
 
         if(starved)
         {
@@ -180,10 +209,17 @@ void policy::Policy::printTraceAnalysis()
     avgTurn = avgTurn / n;
     avgResp = avgResp / n;
     avgFairness = avgFairness / n;
-    
+
+    // derived metrics for the paper
+    double waitingAvg = (double)sumWaiting / (double)n;
+    double jainIndex  = (jainDen > 0.0) ? (jainNum * jainNum) / ((double)n * jainDen) : 1.0;
+    double throughput = (lastEnd > 0) ? (double)n / (double)lastEnd : 0.0;
+    double cpuUtil    = (lastEnd > 0) ? (double)sumBurst / (double)lastEnd : 0.0;
+
     if (policy::csvMode)
     {
-        // METRICS,policy,turn_avg,turn_max,resp_avg,resp_max,fairness,starvation,ctx_overhead,jobs
+        // METRICS,policy,turn_avg,turn_max,resp_avg,resp_max,fairness,
+        //   starvation,ctx_overhead,jobs,waiting_avg,jain,throughput,cpu_util
         std::cout << "METRICS,"
                   << this->name << ","
                   << avgTurn << "," << maxTurn << ","
@@ -191,7 +227,11 @@ void policy::Policy::printTraceAnalysis()
                   << avgFairness << ","
                   << starvation << ","
                   << contextSwitches * contextSwitchTime << ","
-                  << this->trace.s.schedule.size() << std::endl;
+                  << this->trace.s.schedule.size() << ","
+                  << waitingAvg << ","
+                  << jainIndex << ","
+                  << throughput << ","
+                  << cpuUtil << std::endl;
     }
     else
     {

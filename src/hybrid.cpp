@@ -21,6 +21,13 @@
 //   Re-evaluates every tick. In sjf mode it preempts the running job
 //   if a shorter eligible job is sitting in the ready queue (closes
 //   the SRTF gap on s13 and s15).
+//
+//   Stabilization window: a mode change is only honored if at least
+//   hybStabilization ticks have passed since the last change. This is
+//   the proposal's "preventing rapid switching" countermeasure. Without
+//   it the dispatcher oscillates between FCFS, SJF, and RR every few
+//   ticks on medium-CoV workloads (s4, s6) and pays double the context
+//   switches of pure RR while running an unstable mix of all three.
 // ------------------------------------------------------------------------
 // Author: Illiasse Mounjim
 // Version: 2026.04.27
@@ -40,10 +47,11 @@
 
 using namespace local;
 
-unsigned int const hybIoRange   = 100; // max i/o duration in ticks
-int          const hybIoCutoff  = 15;  // avg percentIO above this -> RR mode
-double       const hybCovLow    = 0.2; // CoV below this -> FCFS
-double       const hybCovHigh   = 0.5; // CoV above this -> SJF
+unsigned int const hybIoRange       = 100; // max i/o duration in ticks
+int          const hybIoCutoff      = 15;  // avg percentIO above this -> RR mode
+double       const hybCovLow        = 0.2; // CoV below this -> FCFS
+double       const hybCovHigh       = 0.5; // CoV above this -> SJF
+std::uint64_t const hybStabilization = 250; // min ticks between mode changes (kills oscillation on s4 and s6)
 
 enum HybridMode { MODE_FCFS = 0, MODE_SJF = 1, MODE_RR = 2 };
 
@@ -115,6 +123,20 @@ HybridMode pickMode(Schedule &q, std::uint64_t t)
     if (cov <  hybCovLow)   return MODE_FCFS;
     if (cov >  hybCovHigh)  return MODE_SJF;
     return MODE_RR;
+}
+
+// hold the current mode unless hybStabilization ticks have passed since
+// the last change. without this the dispatcher flips on consecutive
+// ticks and ends up running an unstable mix of three policies (see s4
+// and s6 forensics, the proposal predicted exactly this failure mode).
+HybridMode pickModeStable(Schedule &q, std::uint64_t t,
+                          HybridMode current, std::uint64_t &lastChange)
+{
+    HybridMode candidate = pickMode(q, t);
+    if (candidate == current)                    return current;     // nothing to debate
+    if (t < lastChange + hybStabilization)       return current;     // inside the hold window
+    lastChange = t;
+    return candidate;
 }
 
 // return the index of the next job to run given the chosen mode.
@@ -189,7 +211,8 @@ policy::Trace hybridRunJobs(Schedule s, int quantum)
     std::sort(readyQueue.schedule.begin(), readyQueue.schedule.end(),
         [](Job a, Job b) { return a.getArrival() < b.getArrival(); });
 
-    HybridMode mode = pickMode(readyQueue, 0);
+    HybridMode    mode           = pickMode(readyQueue, 0);
+    std::uint64_t lastModeChange = 0;                                   // ticks since the last accepted mode change
 
     Job  running    = readyQueue.schedule.front();
     readyQueue.schedule.erase(readyQueue.schedule.begin());
@@ -225,7 +248,7 @@ policy::Trace hybridRunJobs(Schedule s, int quantum)
         // hides the variance until it finishes.
         Schedule combined = readyQueue;
         if (!noRunning) combined.schedule.push_back(running);
-        mode = pickMode(combined, currTime);
+        mode = pickModeStable(combined, currTime, mode, lastModeChange);
 
         // sjf-mode preemption. if a shorter eligible job is sitting in
         // the ready queue, swap to it. this is what closes the SRTF gap
@@ -269,7 +292,7 @@ policy::Trace hybridRunJobs(Schedule s, int quantum)
                                              running.getID()));
                 breakStart = 0;
             }
-            mode    = pickMode(readyQueue, currTime);
+            mode    = pickModeStable(readyQueue, currTime, mode, lastModeChange);
             running = hybridNextJob(readyQueue, currTime, noRunning,
                                     breakStart, trace, mode);
             if (noRunning && breakStart == 0) breakStart = currTime;
@@ -283,7 +306,7 @@ policy::Trace hybridRunJobs(Schedule s, int quantum)
             running.setStarted(false);
             readyQueue.schedule.push_back(running);
 
-            mode    = pickMode(readyQueue, currTime);
+            mode    = pickModeStable(readyQueue, currTime, mode, lastModeChange);
             running = hybridNextJob(readyQueue, currTime, noRunning,
                                     breakStart, trace, mode);
             if (noRunning && breakStart == 0) breakStart = currTime;
@@ -299,7 +322,7 @@ policy::Trace hybridRunJobs(Schedule s, int quantum)
             running.setIOEnd((int)(hybRand(hybIoRange) + currTime));
             blockedQueue.schedule.push_back(running);
 
-            mode    = pickMode(readyQueue, currTime);
+            mode    = pickModeStable(readyQueue, currTime, mode, lastModeChange);
             running = hybridNextJob(readyQueue, currTime, noRunning,
                                     breakStart, trace, mode);
             if (noRunning && breakStart == 0) breakStart = currTime;

@@ -1,12 +1,12 @@
 /*
- * rr.cpp — Round Robin (preemptive, time-sliced)
+ * rr.cpp, Round Robin (preemptive, time-sliced)
  *
  * Each job runs for at most `quantum` ticks, then gets preempted to the
  * back of the ready queue. Guarantees bounded wait: (n-1)*quantum.
  * Starvation-free by design, but small quantum = lots of context switches
  * and large quantum degenerates into FCFS (OSTEP ch7).
  *
- * I/O model is the same as sjf.cpp and fcfs.cpp — percentIO chance of
+ * I/O model is the same as sjf.cpp and fcfs.cpp, percentIO chance of
  * blocking each tick, random duration in [0, 100).
  */
 
@@ -24,7 +24,7 @@ using namespace local;
 
 unsigned int const rrIoRange = 100; // max i/o duration in ticks
 
-// bias-free rand in [0, range) — same rejection method as sjf/fcfs
+// bias-free rand in [0, range), same rejection method as sjf/fcfs
 unsigned rrRand(unsigned range)
 {
     for (unsigned x, r;;)
@@ -115,7 +115,7 @@ policy::Trace rrRunJobs(Schedule s, int quantum)
                     breakStart = currTime;
             }
         }
-        // quantum used up — preempt, push to tail, pull next arrived
+        // quantum used up, preempt, push to tail, pull next arrived
         else if (slice >= quantum && !noRunning)
         {
             trace.addEvent(policy::Event(running.getStart(), currTime,
@@ -141,7 +141,7 @@ policy::Trace rrRunJobs(Schedule s, int quantum)
             }
         }
 
-        // i/o block — stochastic, same model as sjf/fcfs
+        // i/o block, stochastic, same model as sjf/fcfs
         if (rrRand(100) < running.getPercentIO() && !noRunning)
         {
             trace.addEvent(policy::Event(running.getStart(), currTime,

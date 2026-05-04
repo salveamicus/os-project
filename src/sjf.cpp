@@ -1,11 +1,11 @@
 /*
- * sjf.cpp — Shortest Job First (non-preemptive)
+ * sjf.cpp, Shortest Job First (non-preemptive)
  *
  * Picks the job with the smallest remaining burst from the ready set.
  * Optimal for avg waiting time in the non-preemptive case (OSTEP ch7),
  * but starves long jobs when short ones keep showing up.
  *
- * I/O model matches fcfs.cpp — each tick has a percentIO chance of
+ * I/O model matches fcfs.cpp, each tick has a percentIO chance of
  * blocking, and blocked jobs sit out for a random duration in [0, 100).
  */
 #include <cstdint>
